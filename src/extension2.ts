@@ -1,0 +1,173 @@
+// import * as vscode from 'vscode';
+
+// let statusBarItem: vscode.StatusBarItem;
+
+// // 激活插件时的入口
+// export function activate(context: vscode.ExtensionContext) {
+//   // ========== 1. 创建状态栏项 ==========
+//   statusBarItem = vscode.window.createStatusBarItem(
+//     vscode.StatusBarAlignment.Left, // 位置：右侧（Left 为左侧）
+//     0, // 优先级（数值越大越靠右/左）
+//   );
+
+//   // ========== 2. 配置状态栏样式和内容 ==========
+//   statusBarItem.text = '$(tag) i18n'; // 文本 + 内置图标（tag 是标签图标）
+//   const tooltip = new vscode.MarkdownString(
+//     `
+//  ### i18n-json-code-lens
+
+//  统计as const对象属性引用次数
+//     `,
+//     true,
+//   );
+
+//   tooltip.isTrusted = true;
+
+//   statusBarItem.tooltip = tooltip;
+//   statusBarItem.command = 'i18n-json-code-lens.countRefs'; // 点击触发的命令
+
+//   // ========== 3. 显示状态栏 ==========
+//   // statusBarItem.show();
+
+//   const codeLensProvider = vscode.languages.registerCodeLensProvider(
+//     [
+//       { language: 'typescript', scheme: 'file' },
+//       { language: 'typescriptreact', scheme: 'file' },
+//     ],
+//     new TSFunctionCodeLensProvider(),
+//   );
+
+//   context.subscriptions.push(codeLensProvider);
+// }
+
+// interface DartReferenceCounterConfig {
+//   enabled: boolean;
+// }
+
+// class TSFunctionCodeLensProvider implements vscode.CodeLensProvider {
+//   // 缓存引用数（优化性能）
+//   private referenceCache = new Map<string, number>();
+//   private cacheExpireTime = 5000; // 缓存5秒
+//   private cacheTimestamps = new Map<string, number>();
+
+//   /**
+//    * 递归提取所有函数/方法符号（SymbolKind.Function | SymbolKind.Method）
+//    */
+//   private extractAllFunctions(
+//     symbols: vscode.DocumentSymbol[],
+//     document: vscode.TextDocument,
+//     isChildren = false,
+//   ): vscode.DocumentSymbol[] {
+//     const functions: vscode.DocumentSymbol[] = [];
+
+//     for (const symbol of symbols) {
+//       // 匹配函数（全局函数）或方法（类中的函数）
+//       // console.log(symbol);
+//       // console.log(document.getText(symbol.range));
+//       // ! 获取代码
+//       const code = document.getText(symbol.range) || '';
+//       if ((symbol.kind == vscode.SymbolKind.Variable && code.includes('as const')) || isChildren) {
+//         functions.push(symbol);
+//         // 递归处理子符号（比如类中的方法、嵌套函数）
+//         if (symbol.children.length > 0) {
+//           functions.push(...this.extractAllFunctions(symbol.children, document, true));
+//         }
+//       }
+//     }
+
+//     return functions;
+//   }
+
+//   async provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
+//     const codeLenses: vscode.CodeLens[] = [];
+
+//     const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+//       'vscode.executeDocumentSymbolProvider',
+//       document.uri,
+//     );
+//     // console.log('symbols', symbols);
+//     if (symbols && !token.isCancellationRequested) {
+//       // 2. 递归提取所有函数/方法符号（包含类中的方法）
+//       const functionSymbols = this.extractAllFunctions(symbols, document);
+
+//       // console.log('functionSymbols', functionSymbols);
+//       for (const func of functionSymbols) {
+//         // 跳过取消请求
+//         if (token.isCancellationRequested) {
+//           break;
+//         }
+
+//         // 函数名的精准位置（CodeLens显示在函数名上方/行首）
+//         // func.range 是函数的完整范围，func.selectionRange 是函数名的精准范围
+//         const funcNameRange = func.selectionRange;
+//         // CodeLens显示在函数名所在行的最左侧
+//         const codeLensPosition = new vscode.Position(funcNameRange.start.line, 0);
+//         const codeLensRange = new vscode.Range(codeLensPosition, codeLensPosition);
+//         // 4. 生成唯一缓存key（基于函数名的精准位置）
+//         const cacheKey = `${funcNameRange.start.line}-${funcNameRange.start.character}`;
+
+//         // 2. 获取引用次数（带缓存）
+//         let refCount = 0;
+//         // console.log('startPos', match.index, startPos, range);
+//         try {
+//           refCount = await this.getReferenceCount(document, funcNameRange.start, cacheKey);
+//         } catch (e) {
+//           // console.error('获取引用失败:', e);
+//           refCount = -1;
+//         }
+
+//         // 3. 构建 CodeLens
+//         const codeLens = new vscode.CodeLens(codeLensRange);
+//         codeLens.command = {
+//           title: refCount === -1 ? '' : `${refCount} 个引用`,
+//           command: 'editor.action.findReferences',
+//           arguments: [document.uri, funcNameRange.start], // 点击跳转到引用列表
+//           // tooltip: '点击查看引用列表, as const lens',
+//         };
+//         codeLenses.push(codeLens);
+//       }
+//     }
+
+//     return codeLenses;
+//   }
+
+//   // 核心方法：获取函数引用次数（通用方案，不依赖 Dart LSP 内部 API）
+//   private async getReferenceCount(
+//     document: vscode.TextDocument,
+//     position: vscode.Position,
+//     cacheKey: string,
+//   ): Promise<number> {
+//     // 1. 检查缓存
+//     const now = Date.now();
+//     const cacheTime = this.cacheTimestamps.get(cacheKey);
+//     if (cacheTime && now - cacheTime < this.cacheExpireTime) {
+//       return this.referenceCache.get(cacheKey) || 0;
+//     }
+
+//     // 2. 调用 VS Code 内置的查找引用 API（通用方式）
+//     const references = await vscode.commands.executeCommand<vscode.Location[]>(
+//       'vscode.executeReferenceProvider', // 内置命令，所有语言都支持
+//       document.uri,
+//       position,
+//     );
+
+//     // 3. 统计引用次数（排除自身定义）
+//     let count = 0;
+//     // console.log('references', references);
+//     if (references && references.length > 0) {
+//       // 过滤掉函数自身的定义行
+//       // console.log('references.length', references.length);
+//       count = references.filter((ref) => {
+//         return !(ref.uri.toString() === document.uri.toString() && ref.range.start.line === position.line);
+//       }).length;
+//     }
+
+//     return count;
+//   }
+
+//   resolveCodeLens?(codeLens: vscode.CodeLens): vscode.CodeLens {
+//     return codeLens;
+//   }
+// }
+
+// export function deactivate() {}
