@@ -1,7 +1,14 @@
 # Change Log
 
-## [0.1.0]
+## [0.0.1]
 
-- 使用 vscode.executeDocumentSymbolProvider 命令替换之前的正则获取 as const变量;
-- 使用code.includes('as const'); 判断上会有一定的误差，但是基本可以满足需求;
-- 添加 vscode 设置项;
+### 注意点
+
+- 要在 json 文件点击任务栏图标运行(自动影响性能)
+- 有缓存, 保存及失效
+- 多语言的函数名必须为 t
+- t 函数首个参数必须是字符串(变量解析不到, 也不能是三元运算)
+
+### 示例
+
+![这是示例](/images/example.png)
